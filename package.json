@@ -10,6 +10,6 @@
     "axios": "^1.6.2",
     "@supabase/supabase-js": "^2.7.0",
     "openai": "^4.3.1",
-    "dayjs": "^1.12.7"
+    "dayjs": "^1.12.8"
   }
 }
