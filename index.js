@@ -7,14 +7,22 @@ const dayjs = require('dayjs');
 const app = express();
 app.use(express.json());
 
-// Supabase & OpenAI setup
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
-const openai = new OpenAIApi(new Configuration({ apiKey: process.env.OPENAI_KEY }));
+// ------------------ TEST KEYS (hardcoded) ------------------
+const SUPABASE_URL = 'https://lqugtfzuffmtxoiljogs.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxxdWd0Znp1ZmZtdHhvaWxqb2dzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM5NjIwNzQsImV4cCI6MjA3OTUzODA3NH0.4_rIKGhmnJp_NlXhBYXBA4079Ewz7qZ1D4zAxfNS_eU';
+const OPENAI_KEY = 'sk-5678ijklmnopabcd5678ijklmnopabcd5678ijkl';
+const ULTRAMSG_INSTANCE = 'instance152658';
+const ULTRAMSG_TOKEN = 'ackcog87mi4qvvhj';
+const WEBSITE_URL = 'https://zentfinance.netlify.app/';
+// ------------------------------------------------------------
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const openai = new OpenAIApi(new Configuration({ apiKey: OPENAI_KEY }));
 
 // Send WhatsApp message
 async function sendWhatsApp(to, body) {
-  await axios.post(`https://api.ultramsg.com/${process.env.ULTRAMSG_INSTANCE}/messages/chat`, {
-    token: process.env.ULTRAMSG_TOKEN,
+  await axios.post(`https://api.ultramsg.com/${ULTRAMSG_INSTANCE}/messages/chat`, {
+    token: ULTRAMSG_TOKEN,
     to,
     body
   });
@@ -49,14 +57,14 @@ async function updateInvestments() {
   }
 }
 
-// Send daily/weekly financial report
+// Send daily financial report
 async function sendFinancialReports() {
   const { data: users } = await supabase.from('users').select('*');
 
   for (const user of users) {
     const { data: investments } = await supabase.from('investments').select('*').eq('user_id', user.id);
     const { data: transactions } = await supabase.from('transactions').select('*').eq('user_id', user.id)
-      .gte('created_at', dayjs().subtract(1, 'day').format()); // daily report, change to 'week' for weekly
+      .gte('created_at', dayjs().subtract(1, 'day').format()); // daily report
 
     let report = `Hello ${user.name}, here is your daily financial report:\n\nBalance: ${user.balance}\n`;
 
@@ -78,30 +86,7 @@ async function sendFinancialReports() {
 
 // Schedule investment update & daily report
 setInterval(updateInvestments, 1000 * 60 * 60); // hourly
-setInterval(sendFinancialReports, 1000 * 60 * 60 * 24); // daily (change to 7 days for weekly)
-
-// Proactive suggestions
-async function sendSuggestions() {
-  const { data: users } = await supabase.from('users').select('*');
-  const { data: plans } = await supabase.from('plans').select('*');
-
-  for (const user of users) {
-    const lastSent = user.last_suggestion_sent ? dayjs(user.last_suggestion_sent) : dayjs().subtract(2, 'day');
-    if (dayjs().diff(lastSent, 'day') >= 1) {
-      const affordablePlans = plans.filter(p => user.balance >= p.min_investment);
-      if (affordablePlans.length === 0) continue;
-
-      const suggestion = `Hi ${user.name}, based on your balance of ${user.balance}, you can invest in:\n` +
-        affordablePlans.map(p => `${p.name}: ${p.duration_days} days, Daily Return ${p.daily_return}%`).join('\n') +
-        `\nReply "Invest [amount] [PlanName]" to start an investment or ask me any questions about your account.`;
-
-      await sendWhatsApp(user.phone, suggestion);
-      await supabase.from('users').update({ last_suggestion_sent: dayjs().format('YYYY-MM-DD') }).eq('id', user.id);
-    }
-  }
-}
-
-setInterval(sendSuggestions, 1000 * 60 * 60 * 6); // every 6 hours
+setInterval(sendFinancialReports, 1000 * 60 * 60 * 24); // daily
 
 // WhatsApp webhook
 app.post('/webhook', async (req, res) => {
@@ -113,7 +98,7 @@ app.post('/webhook', async (req, res) => {
 
     const { data: plans } = await supabase.from('plans').select('*');
     const { data: investments } = await supabase.from('investments').select('*').eq('user_id', user.id).eq('active', true);
-    const websiteContent = (await axios.get(process.env.WEBSITE_URL)).data;
+    const websiteContent = (await axios.get(WEBSITE_URL)).data;
 
     let reply = '';
 
@@ -165,7 +150,7 @@ app.post('/webhook', async (req, res) => {
       }
     }
 
-    // Natural language fallback
+    // GPT natural language fallback
     if (!reply) {
       const gptPrompt = `
 You are a smart AI financial assistant for Zent Finance.
