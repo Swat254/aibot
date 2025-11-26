@@ -1,40 +1,46 @@
 const express = require('express');
 const axios = require('axios');
 const { createClient } = require('@supabase/supabase-js');
-const { Configuration, OpenAIApi } = require('openai');
+const OpenAI = require('openai');
 const dayjs = require('dayjs');
 
 const app = express();
 app.use(express.json());
 
-// ------------------ TEST KEYS (hardcoded for testing) ------------------
-const SUPABASE_URL = 'https://lqugtfzuffmtxoiljogs.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxxdWd0Znp1ZmZtdHhvaWxqb2dzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM5NjIwNzQsImV4cCI6MjA3OTUzODA3NH0.4_rIKGhmnJp_NlXhBYXBA4079Ewz7qZ1D4zAxfNS_eU';
-const OPENAI_KEY = 'sk-5678ijklmnopabcd5678ijklmnopabcd5678ijkl';
-const ULTRAMSG_INSTANCE = 'instance152658';
-const ULTRAMSG_TOKEN = 'ackcog87mi4qvvhj';
-const WEBSITE_URL = 'https://zentfinance.netlify.app/';
-// ------------------------------------------------------------------------
+// -------------------- ENVIRONMENT VARIABLES --------------------
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_KEY;
+const OPENAI_KEY = process.env.OPENAI_KEY;
+const ULTRAMSG_INSTANCE = process.env.ULTRAMSG_INSTANCE;
+const ULTRAMSG_TOKEN = process.env.ULTRAMSG_TOKEN;
+const WEBSITE_URL = process.env.WEBSITE_URL;
+// ---------------------------------------------------------------
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-const openai = new OpenAIApi(new Configuration({ apiKey: OPENAI_KEY }));
+const openai = new OpenAI.OpenAIApi({ apiKey: OPENAI_KEY });
 
-// Function to send WhatsApp messages
+// ------------------ WhatsApp Helper ------------------
 async function sendWhatsApp(to, body) {
-  await axios.post(`https://api.ultramsg.com/${ULTRAMSG_INSTANCE}/messages/chat`, {
-    token: ULTRAMSG_TOKEN,
-    to,
-    body
-  });
+  try {
+    await axios.post(`https://api.ultramsg.com/${ULTRAMSG_INSTANCE}/messages/chat`, {
+      token: ULTRAMSG_TOKEN,
+      to,
+      body
+    });
+  } catch (err) {
+    console.error('WhatsApp send error:', err.message);
+  }
 }
 
-// Update investments and notify users
+// ------------------ Update Investments ------------------
 async function updateInvestments() {
   const { data: investments } = await supabase.from('investments').select('*').eq('active', true);
 
   for (const inv of investments) {
-    const plan = (await supabase.from('plans').select('*').eq('id', inv.plan_id).single()).data;
-    const user = (await supabase.from('users').select('*').eq('id', inv.user_id).single()).data;
+    const planRes = await supabase.from('plans').select('*').eq('id', inv.plan_id).single();
+    const plan = planRes.data;
+    const userRes = await supabase.from('users').select('*').eq('id', inv.user_id).single();
+    const user = userRes.data;
 
     const today = dayjs().startOf('day');
     const lastCalc = dayjs(inv.last_calculated || inv.start_date);
@@ -57,18 +63,18 @@ async function updateInvestments() {
   }
 }
 
-// Send daily financial report
+// ------------------ Daily Financial Reports ------------------
 async function sendFinancialReports() {
   const { data: users } = await supabase.from('users').select('*');
 
   for (const user of users) {
     const { data: investments } = await supabase.from('investments').select('*').eq('user_id', user.id);
     const { data: transactions } = await supabase.from('transactions').select('*').eq('user_id', user.id)
-      .gte('created_at', dayjs().subtract(1, 'day').format()); // daily report
+      .gte('created_at', dayjs().subtract(1, 'day').format());
 
-    let report = `Hello ${user.name}, here is your daily financial report:\n\nBalance: ${user.balance}\n`;
+    let report = `Hello ${user.name}, here is your daily financial report:\n\nBalance: ${user.balance}\n\n`;
 
-    report += '\nActive Investments:\n';
+    report += 'Active Investments:\n';
     if (investments.length === 0) report += 'None\n';
     else investments.forEach(inv => {
       report += `- ${inv.amount} in Plan ${inv.plan_id}, Active: ${inv.active}, Ends: ${inv.end_date}\n`;
@@ -84,20 +90,27 @@ async function sendFinancialReports() {
   }
 }
 
-// Schedule investment updates & daily reports
+// ------------------ Schedule Jobs ------------------
 setInterval(updateInvestments, 1000 * 60 * 60); // hourly
 setInterval(sendFinancialReports, 1000 * 60 * 60 * 24); // daily
 
-// WhatsApp webhook
+// ------------------ Webhook Endpoint ------------------
 app.post('/webhook', async (req, res) => {
   try {
-    const { from, message } = req.body;
+    console.log('Incoming webhook:', req.body);
+
+    // Adjust to UltraMsg keys if needed
+    const from = req.body.from || req.body.wa_id;
+    const message = req.body.message || req.body.text?.body;
+    if (!from || !message) return res.sendStatus(400);
+
     const { data: users } = await supabase.from('users').select('*').eq('phone', from);
     const user = users[0];
     if (!user) return res.sendStatus(404);
 
     const { data: plans } = await supabase.from('plans').select('*');
     const { data: investments } = await supabase.from('investments').select('*').eq('user_id', user.id).eq('active', true);
+
     const websiteContent = (await axios.get(WEBSITE_URL)).data;
 
     let reply = '';
@@ -165,20 +178,23 @@ Instructions:
 - Suggest best plan if asked.
 - Respond naturally like a friendly finance advisor.
 `;
-      const gptResponse = await openai.createChatCompletion({
+      const gptResponse = await openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
         messages: [{ role: 'user', content: gptPrompt }],
         max_tokens: 500
       });
-      reply = gptResponse.data.choices[0].message.content;
+      reply = gptResponse.choices[0].message.content;
     }
 
     await sendWhatsApp(from, reply);
     res.sendStatus(200);
+
   } catch (err) {
-    console.error(err.message);
+    console.error(err);
     res.sendStatus(500);
   }
 });
 
-app.listen(3000, () => console.log('Ultimate Financial Assistant AI running on port 3000'));
+// ------------------ Start Server ------------------
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Zent Finance AI running on port ${PORT}`));
