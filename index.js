@@ -7,19 +7,19 @@ const dayjs = require('dayjs');
 const app = express();
 app.use(express.json());
 
-// ------------------ TEST KEYS (hardcoded) ------------------
+// ------------------ TEST KEYS (hardcoded for testing) ------------------
 const SUPABASE_URL = 'https://lqugtfzuffmtxoiljogs.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxxdWd0Znp1ZmZtdHhvaWxqb2dzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM5NjIwNzQsImV4cCI6MjA3OTUzODA3NH0.4_rIKGhmnJp_NlXhBYXBA4079Ewz7qZ1D4zAxfNS_eU';
 const OPENAI_KEY = 'sk-5678ijklmnopabcd5678ijklmnopabcd5678ijkl';
 const ULTRAMSG_INSTANCE = 'instance152658';
 const ULTRAMSG_TOKEN = 'ackcog87mi4qvvhj';
 const WEBSITE_URL = 'https://zentfinance.netlify.app/';
-// ------------------------------------------------------------
+// ------------------------------------------------------------------------
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const openai = new OpenAIApi(new Configuration({ apiKey: OPENAI_KEY }));
 
-// Send WhatsApp message
+// Function to send WhatsApp messages
 async function sendWhatsApp(to, body) {
   await axios.post(`https://api.ultramsg.com/${ULTRAMSG_INSTANCE}/messages/chat`, {
     token: ULTRAMSG_TOKEN,
@@ -47,7 +47,7 @@ async function updateInvestments() {
       await supabase.from('users').update({ balance: user.balance + totalProfit }).eq('id', user.id);
       await supabase.from('investments').update({ last_calculated: today.format('YYYY-MM-DD') }).eq('id', inv.id);
 
-      await sendWhatsApp(user.phone, `Your daily earning from ${plan.name} is ${dailyProfit * daysPassed}. Current balance: ${user.balance + totalProfit}.`);
+      await sendWhatsApp(user.phone, `Your daily earning from ${plan.name} is ${totalProfit}. Current balance: ${user.balance + totalProfit}.`);
     }
 
     if (today.isAfter(dayjs(inv.end_date))) {
@@ -84,7 +84,7 @@ async function sendFinancialReports() {
   }
 }
 
-// Schedule investment update & daily report
+// Schedule investment updates & daily reports
 setInterval(updateInvestments, 1000 * 60 * 60); // hourly
 setInterval(sendFinancialReports, 1000 * 60 * 60 * 24); // daily
 
@@ -150,7 +150,7 @@ app.post('/webhook', async (req, res) => {
       }
     }
 
-    // GPT natural language fallback
+    // GPT fallback
     if (!reply) {
       const gptPrompt = `
 You are a smart AI financial assistant for Zent Finance.
