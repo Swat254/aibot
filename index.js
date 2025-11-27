@@ -17,10 +17,7 @@ const WEBSITE_URL = process.env.WEBSITE_URL;
 // ---------------------------------------------------------------
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-const openai = new OpenAI({
-  apiKey: OPENAI_KEY
-});
+const openai = new OpenAI({ apiKey: OPENAI_KEY });
 
 // ------------------ WhatsApp Helper ------------------
 async function sendWhatsApp(to, body) {
@@ -70,19 +67,20 @@ async function sendFinancialReports() {
 
   for (const user of users) {
     const { data: investments } = await supabase.from('investments').select('*').eq('user_id', user.id);
-    const { data: transactions } = await supabase.from('transactions').select('*').eq('user_id', user.id)
+    const { data: transactions } = await supabase.from('transactions').select('*')
+      .eq('user_id', user.id)
       .gte('created_at', dayjs().subtract(1, 'day').format());
 
     let report = `Hello ${user.name}, here is your daily financial report:\n\nBalance: ${user.balance}\n\n`;
 
     report += 'Active Investments:\n';
-    if (investments.length === 0) report += 'None\n';
+    if (!investments || investments.length === 0) report += 'None\n';
     else investments.forEach(inv => {
       report += `- ${inv.amount} in Plan ${inv.plan_id}, Active: ${inv.active}, Ends: ${inv.end_date}\n`;
     });
 
     report += '\nTransactions Today:\n';
-    if (transactions.length === 0) report += 'None\n';
+    if (!transactions || transactions.length === 0) report += 'None\n';
     else transactions.forEach(tr => {
       report += `- ${tr.type} of ${tr.amount}, Status: ${tr.status}\n`;
     });
@@ -103,35 +101,44 @@ app.get('/', (req, res) => {
 // ------------------ Webhook Endpoint ------------------
 app.post('/webhook', async (req, res) => {
   try {
-    console.log('Incoming webhook:', req.body);
+    const data = req.body.data;
+    if (!data) return res.sendStatus(400);
 
-    // Robust message parsing
-    const from = req.body.from || req.body.wa_id;
-    const message = req.body.body || req.body.message || req.body.text?.body;
+    const from = data.from;
+    const message = data.body;
+
     if (!from || !message) return res.sendStatus(400);
 
+    console.log('Parsed message:', { from, message });
+
+    // ------------------ Get user ------------------
     const { data: users } = await supabase.from('users').select('*').eq('phone', from);
     const user = users[0];
-    if (!user) return res.sendStatus(404);
+    if (!user) {
+      await sendWhatsApp(from, `Hello! I could not find your account. Please register on the website first.`);
+      return res.sendStatus(404);
+    }
 
+    // ------------------ Fetch data ------------------
     const { data: plans } = await supabase.from('plans').select('*');
     const { data: investments } = await supabase.from('investments').select('*').eq('user_id', user.id).eq('active', true);
 
+    // ------------------ Fetch website ------------------
     let websiteContent = '';
-    try { websiteContent = (await axios.get(WEBSITE_URL)).data; } catch {}
+    try { websiteContent = (await axios.get(WEBSITE_URL)).data; } catch (err) { console.error('Website fetch error:', err.message); }
 
     let reply = '';
 
-    // Deposit
+    // ------------------ Handle deposit ------------------
     const depositMatch = message.match(/deposit (\d+)/i);
     if (depositMatch) {
       const amount = parseFloat(depositMatch[1]);
       await supabase.from('users').update({ balance: user.balance + amount }).eq('id', user.id);
       await supabase.from('transactions').insert([{ user_id: user.id, type: 'deposit', amount, status: 'approved', created_at: dayjs().format() }]);
-      reply = `Deposit successful. New balance: ${user.balance + amount}.`;
+      reply = `Deposit of ${amount} successful. New balance: ${user.balance + amount}.`;
     }
 
-    // Withdraw
+    // ------------------ Handle withdraw ------------------
     const withdrawMatch = message.match(/withdraw (\d+)/i);
     if (withdrawMatch) {
       const amount = parseFloat(withdrawMatch[1]);
@@ -143,7 +150,7 @@ app.post('/webhook', async (req, res) => {
       }
     }
 
-    // Invest
+    // ------------------ Handle invest ------------------
     const investMatch = message.match(/invest (\d+) (\w+)/i);
     if (investMatch) {
       const amount = parseFloat(investMatch[1]);
@@ -170,7 +177,7 @@ app.post('/webhook', async (req, res) => {
       }
     }
 
-    // GPT fallback
+    // ------------------ GPT fallback ------------------
     if (!reply) {
       const gptPrompt = `
 You are a smart AI financial assistant for Zent Finance.
