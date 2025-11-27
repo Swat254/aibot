@@ -17,7 +17,10 @@ const WEBSITE_URL = process.env.WEBSITE_URL;
 // ---------------------------------------------------------------
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-const openai = new OpenAI.OpenAIApi({ apiKey: OPENAI_KEY });
+
+const openai = new OpenAI({
+  apiKey: OPENAI_KEY
+});
 
 // ------------------ WhatsApp Helper ------------------
 async function sendWhatsApp(to, body) {
@@ -37,10 +40,8 @@ async function updateInvestments() {
   const { data: investments } = await supabase.from('investments').select('*').eq('active', true);
 
   for (const inv of investments) {
-    const planRes = await supabase.from('plans').select('*').eq('id', inv.plan_id).single();
-    const plan = planRes.data;
-    const userRes = await supabase.from('users').select('*').eq('id', inv.user_id).single();
-    const user = userRes.data;
+    const { data: plan } = await supabase.from('plans').select('*').eq('id', inv.plan_id).single();
+    const { data: user } = await supabase.from('users').select('*').eq('id', inv.user_id).single();
 
     const today = dayjs().startOf('day');
     const lastCalc = dayjs(inv.last_calculated || inv.start_date);
@@ -99,7 +100,6 @@ app.post('/webhook', async (req, res) => {
   try {
     console.log('Incoming webhook:', req.body);
 
-    // Adjust to UltraMsg keys if needed
     const from = req.body.from || req.body.wa_id;
     const message = req.body.message || req.body.text?.body;
     if (!from || !message) return res.sendStatus(400);
@@ -111,7 +111,8 @@ app.post('/webhook', async (req, res) => {
     const { data: plans } = await supabase.from('plans').select('*');
     const { data: investments } = await supabase.from('investments').select('*').eq('user_id', user.id).eq('active', true);
 
-    const websiteContent = (await axios.get(WEBSITE_URL)).data;
+    let websiteContent = '';
+    try { websiteContent = (await axios.get(WEBSITE_URL)).data; } catch {}
 
     let reply = '';
 
