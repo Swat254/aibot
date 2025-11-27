@@ -7,34 +7,35 @@ const dayjs = require('dayjs');
 const app = express();
 app.use(express.json());
 
-// -------------------- ENVIRONMENT VARIABLES --------------------
+// -------------------- ENV VARIABLES --------------------
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 const ULTRAMSG_INSTANCE = process.env.ULTRAMSG_INSTANCE;
 const ULTRAMSG_TOKEN = process.env.ULTRAMSG_TOKEN;
 const WEBSITE_URL = process.env.WEBSITE_URL;
-// ---------------------------------------------------------------
+// ---------------------------------------------------------
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const openai = new OpenAI({ apiKey: OPENAI_KEY });
 
-// ------------------ WhatsApp Helper ------------------
+// ---------------- WhatsApp Helper ----------------
 async function sendWhatsApp(to, body) {
   try {
-    await axios.post(`https://api.ultramsg.com/${ULTRAMSG_INSTANCE}/messages/chat`, {
-      token: ULTRAMSG_TOKEN,
-      to,
-      body
-    });
+    await axios.post(
+      `https://api.ultramsg.com/${ULTRAMSG_INSTANCE}/messages/chat`,
+      { token: ULTRAMSG_TOKEN, to, body },
+      { headers: { 'Content-Type': 'application/json' } } // important
+    );
   } catch (err) {
-    console.error('WhatsApp send error:', err.message);
+    console.error('WhatsApp send error:', err.response?.data || err.message);
   }
 }
 
-// ------------------ Update Investments ------------------
+// ---------------- Update Investments ----------------
 async function updateInvestments() {
   const { data: investments } = await supabase.from('investments').select('*').eq('active', true);
+  if (!investments) return;
 
   for (const inv of investments) {
     const { data: plan } = await supabase.from('plans').select('*').eq('id', inv.plan_id).single();
@@ -61,9 +62,10 @@ async function updateInvestments() {
   }
 }
 
-// ------------------ Daily Financial Reports ------------------
+// ---------------- Daily Reports ----------------
 async function sendFinancialReports() {
   const { data: users } = await supabase.from('users').select('*');
+  if (!users) return;
 
   for (const user of users) {
     const { data: investments } = await supabase.from('investments').select('*').eq('user_id', user.id);
@@ -89,18 +91,20 @@ async function sendFinancialReports() {
   }
 }
 
-// ------------------ Schedule Jobs ------------------
+// ---------------- Schedule Jobs ----------------
 setInterval(updateInvestments, 1000 * 60 * 60); // hourly
 setInterval(sendFinancialReports, 1000 * 60 * 60 * 24); // daily
 
-// ------------------ Homepage ------------------
+// ---------------- Homepage ----------------
 app.get('/', (req, res) => {
   res.send('Zent Finance AI is running! Send POST requests to /webhook for WhatsApp messages.');
 });
 
-// ------------------ Webhook Endpoint ------------------
+// ---------------- Webhook ----------------
 app.post('/webhook', async (req, res) => {
   try {
+    console.log('Webhook hit:', JSON.stringify(req.body, null, 2));
+
     const data = req.body.data;
     if (!data) return res.sendStatus(400);
 
@@ -110,7 +114,7 @@ app.post('/webhook', async (req, res) => {
 
     console.log('Parsed message:', { from, message });
 
-    // ------------------ Get user ------------------
+    // -------- Get user --------
     const { data: users } = await supabase.from('users').select('*').eq('phone', from);
     const user = users?.[0];
     if (!user) {
@@ -118,17 +122,17 @@ app.post('/webhook', async (req, res) => {
       return res.sendStatus(404);
     }
 
-    // ------------------ Fetch plans and investments ------------------
+    // -------- Fetch plans & investments --------
     const { data: plans } = await supabase.from('plans').select('*');
     const { data: investments } = await supabase.from('investments').select('*').eq('user_id', user.id).eq('active', true);
 
-    // ------------------ Fetch website ------------------
+    // -------- Fetch website content --------
     let websiteContent = '';
     try { websiteContent = (await axios.get(WEBSITE_URL)).data; } catch (err) { console.error('Website fetch error:', err.message); }
 
     let reply = '';
 
-    // ------------------ Handle deposit ------------------
+    // -------- Handle deposit --------
     const depositMatch = message.match(/deposit (\d+)/i);
     if (depositMatch) {
       const amount = parseFloat(depositMatch[1]);
@@ -137,7 +141,7 @@ app.post('/webhook', async (req, res) => {
       reply = `Deposit of ${amount} successful. New balance: ${user.balance + amount}.`;
     }
 
-    // ------------------ Handle withdraw ------------------
+    // -------- Handle withdraw --------
     const withdrawMatch = message.match(/withdraw (\d+)/i);
     if (withdrawMatch) {
       const amount = parseFloat(withdrawMatch[1]);
@@ -149,7 +153,7 @@ app.post('/webhook', async (req, res) => {
       }
     }
 
-    // ------------------ Handle invest ------------------
+    // -------- Handle invest --------
     const investMatch = message.match(/invest (\d+) (\w+)/i);
     if (investMatch) {
       const amount = parseFloat(investMatch[1]);
@@ -176,7 +180,7 @@ app.post('/webhook', async (req, res) => {
       }
     }
 
-    // ------------------ GPT fallback ------------------
+    // -------- GPT fallback --------
     if (!reply) {
       const gptPrompt = `
 You are a smart AI financial assistant for Zent Finance.
@@ -203,11 +207,11 @@ Instructions:
     res.sendStatus(200);
 
   } catch (err) {
-    console.error(err);
+    console.error('Webhook error:', err);
     res.sendStatus(500);
   }
 });
 
-// ------------------ Start Server ------------------
+// ---------------- Start Server ----------------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Zent Finance AI running on port ${PORT}`));
