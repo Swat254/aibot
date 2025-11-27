@@ -105,21 +105,20 @@ app.post('/webhook', async (req, res) => {
     if (!data) return res.sendStatus(400);
 
     const from = data.from;
-    const message = data.body;
-
+    const message = data.body?.trim();
     if (!from || !message) return res.sendStatus(400);
 
     console.log('Parsed message:', { from, message });
 
     // ------------------ Get user ------------------
     const { data: users } = await supabase.from('users').select('*').eq('phone', from);
-    const user = users[0];
+    const user = users?.[0];
     if (!user) {
       await sendWhatsApp(from, `Hello! I could not find your account. Please register on the website first.`);
       return res.sendStatus(404);
     }
 
-    // ------------------ Fetch data ------------------
+    // ------------------ Fetch plans and investments ------------------
     const { data: plans } = await supabase.from('plans').select('*');
     const { data: investments } = await supabase.from('investments').select('*').eq('user_id', user.id).eq('active', true);
 
