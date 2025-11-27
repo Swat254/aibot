@@ -95,13 +95,19 @@ async function sendFinancialReports() {
 setInterval(updateInvestments, 1000 * 60 * 60); // hourly
 setInterval(sendFinancialReports, 1000 * 60 * 60 * 24); // daily
 
+// ------------------ Homepage ------------------
+app.get('/', (req, res) => {
+  res.send('Zent Finance AI is running! Send POST requests to /webhook for WhatsApp messages.');
+});
+
 // ------------------ Webhook Endpoint ------------------
 app.post('/webhook', async (req, res) => {
   try {
     console.log('Incoming webhook:', req.body);
 
+    // Robust message parsing
     const from = req.body.from || req.body.wa_id;
-    const message = req.body.message || req.body.text?.body;
+    const message = req.body.body || req.body.message || req.body.text?.body;
     if (!from || !message) return res.sendStatus(400);
 
     const { data: users } = await supabase.from('users').select('*').eq('phone', from);
